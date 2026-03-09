@@ -1,6 +1,9 @@
 # Smart Form Filler Extension
 
-Chrome/Brave extension for product managers and testers who repeatedly fill forms with dummy data.
+Privacy-first Chrome/Brave extension that fills forms with realistic local test data, supports rule-based constraints, and speeds up repetitive QA/PM workflows.
+
+Suggested GitHub repository description:
+`Privacy-first Chrome/Brave form filler for QA and PM teams with local dummy data generation, constraints, and upload-field support.`
 
 ## What It Does
 
