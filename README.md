@@ -1,9 +1,9 @@
 # Smart Form Filler Extension
 
-Privacy-first Chrome/Brave extension that fills forms with realistic local test data, supports rule-based constraints, and speeds up repetitive QA/PM workflows.
+Privacy-first Chrome/Brave extension that fills forms with realistic local test data, supports reusable profiles and constraints, and speeds up repetitive QA/PM workflows.
 
 Suggested GitHub repository description:
-`Privacy-first Chrome/Brave form filler for QA and PM teams with local dummy data generation, constraints, and upload-field support.`
+`Privacy-first Chrome/Brave form filler for QA/PM teams with local data generation, profiles, constraints, undo, configurable 2/3-click shortcuts, and upload-field support.`
 
 ## What It Does
 
@@ -12,6 +12,7 @@ Suggested GitHub repository description:
 - Supports global constraints (date mode, text lengths, number ranges).
 - Supports per-field overrides via JSON rules.
 - Detects `input[type=file]` and can auto-attach generated mock files.
+- Supports configurable mouse shortcut trigger (2-click or 3-click).
 - Supports reusable profiles (save and switch settings per project or scenario).
 - Includes one-click undo for the most recent fill operation on the current page.
 
