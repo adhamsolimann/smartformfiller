@@ -122,11 +122,40 @@ textarea {
   color: var(--muted);
 }
 
+.inline-actions {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-actions input {
+  min-width: 0;
+}
+
+button.compact {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+button.danger {
+  color: #7b1c15;
+  border-color: #d9b8b4;
+  background: #fff8f7;
+}
+
 .actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-top: 14px;
+}
+
+.actions.single {
+  grid-template-columns: 1fr;
+  margin-top: 8px;
 }
 
 button {

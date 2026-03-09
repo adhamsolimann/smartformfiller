@@ -14,6 +14,20 @@
       </header>
 
       <section class="section">
+        <h2>Profiles</h2>
+        <label>
+          Active profile
+          <select id="profileSelect"></select>
+        </label>
+        <div class="inline-actions">
+          <input id="profileName" type="text" placeholder="New profile name" maxlength="40" />
+          <button id="saveProfileBtn" class="secondary compact">Save As</button>
+          <button id="deleteProfileBtn" class="secondary compact danger">Delete</button>
+        </div>
+        <p class="hint">Use profiles to switch quickly between QA scenarios and projects.</p>
+      </section>
+
+      <section class="section">
         <h2>Behavior</h2>
         <label class="toggle">
           <input id="preserveFilled" type="checkbox" />
@@ -26,6 +40,13 @@
         <label class="toggle">
           <input id="fileEnabled" type="checkbox" />
           Auto-fill upload fields
+        </label>
+        <label>
+          Mouse shortcut
+          <select id="shortcutClickCount">
+            <option value="2">2 clicks (double-click)</option>
+            <option value="3">3 clicks (triple-click)</option>
+          </select>
         </label>
       </section>
 
@@ -115,6 +136,9 @@
         <button id="saveBtn" class="secondary">Save Settings</button>
         <button id="fillBtn" class="primary">Fill Current Form</button>
       </footer>
+      <div class="actions single">
+        <button id="undoBtn" class="secondary">Undo Last Fill</button>
+      </div>
 
       <p id="status" class="status" role="status" aria-live="polite"></p>
     </main>

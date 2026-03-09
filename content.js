@@ -5,11 +5,16 @@
   window.__smartFormFillerInitialized = true;
 
   const STORAGE_KEY = "smartFormFillerSettings";
-  const SHORTCUT_DOUBLE_CLICK_COOLDOWN_MS = 1200;
+  const STORAGE_STATE_KEY = "smartFormFillerState";
+  const SHORTCUT_CLICK_COOLDOWN_MS = 1200;
+  const SHORTCUT_TRIPLE_CLICK_WINDOW_MS = 700;
 
   const DEFAULT_SETTINGS = {
     preserveFilled: true,
     onlyVisible: true,
+    shortcut: {
+      clickCount: 2
+    },
     file: {
       enabled: true,
       preferredType: "auto",
@@ -171,8 +176,14 @@
   ];
 
   let shortcutLockedUntil = 0;
+  let currentShortcutClickCount = 2;
+  let recentShortcutClicks = [];
+  let lastFillSnapshot = null;
 
+  window.addEventListener("click", onDocumentClick, true);
   window.addEventListener("dblclick", onDocumentDoubleClick, true);
+  chrome.storage.onChanged.addListener(onStorageChanged);
+  void refreshShortcutConfig();
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || typeof message !== "object") {
@@ -181,6 +192,19 @@
 
     if (message.action === "ping") {
       sendResponse({ ok: true });
+      return;
+    }
+
+    if (message.action === "undoFill") {
+      try {
+        const result = undoLastFill();
+        sendResponse({ ok: true, result });
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "Undo failed."
+        });
+      }
       return;
     }
 
@@ -199,8 +223,11 @@
     }
   });
 
-  function onDocumentDoubleClick(event) {
+  function onDocumentClick(event) {
     if (!event.isTrusted || event.button !== 0) {
+      return;
+    }
+    if (currentShortcutClickCount !== 3) {
       return;
     }
 
@@ -209,8 +236,65 @@
       return;
     }
 
-    shortcutLockedUntil = now + SHORTCUT_DOUBLE_CLICK_COOLDOWN_MS;
+    recentShortcutClicks.push(now);
+    recentShortcutClicks = recentShortcutClicks.filter((time) => now - time <= SHORTCUT_TRIPLE_CLICK_WINDOW_MS);
+    if (recentShortcutClicks.length < 3) {
+      return;
+    }
+
+    recentShortcutClicks = [];
+    shortcutLockedUntil = now + SHORTCUT_CLICK_COOLDOWN_MS;
     void triggerShortcutFill();
+  }
+
+  function onDocumentDoubleClick(event) {
+    if (!event.isTrusted || event.button !== 0) {
+      return;
+    }
+    if (currentShortcutClickCount !== 2) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now < shortcutLockedUntil) {
+      return;
+    }
+
+    shortcutLockedUntil = now + SHORTCUT_CLICK_COOLDOWN_MS;
+    void triggerShortcutFill();
+  }
+
+  async function refreshShortcutConfig() {
+    try {
+      const settings = await loadStoredSettings();
+      updateShortcutClickCount(settings);
+    } catch {
+      currentShortcutClickCount = 2;
+      recentShortcutClicks = [];
+    }
+  }
+
+  function onStorageChanged(changes, areaName) {
+    if (areaName !== "local") {
+      return;
+    }
+
+    if (changes[STORAGE_KEY]) {
+      updateShortcutClickCount(changes[STORAGE_KEY].newValue);
+      return;
+    }
+
+    if (changes[STORAGE_STATE_KEY]) {
+      const settings = extractSettingsFromState(changes[STORAGE_STATE_KEY].newValue);
+      if (settings) {
+        updateShortcutClickCount(settings);
+      }
+    }
+  }
+
+  function updateShortcutClickCount(settings) {
+    currentShortcutClickCount = getShortcutClickCount(settings);
+    recentShortcutClicks = [];
   }
 
   async function triggerShortcutFill() {
@@ -240,14 +324,53 @@
 
   function loadStoredSettings() {
     return new Promise((resolve) => {
-      chrome.storage.local.get(STORAGE_KEY, (result) => {
+      chrome.storage.local.get([STORAGE_KEY, STORAGE_STATE_KEY], (result) => {
         if (chrome.runtime.lastError) {
           resolve(clone(DEFAULT_SETTINGS));
           return;
         }
-        resolve(result[STORAGE_KEY] || clone(DEFAULT_SETTINGS));
+
+        const directSettings = result[STORAGE_KEY];
+        if (directSettings && typeof directSettings === "object") {
+          resolve(directSettings);
+          return;
+        }
+
+        const extractedFromState = extractSettingsFromState(result[STORAGE_STATE_KEY]);
+        if (extractedFromState) {
+          resolve(extractedFromState);
+          return;
+        }
+
+        resolve(clone(DEFAULT_SETTINGS));
       });
     });
+  }
+
+  function extractSettingsFromState(rawState) {
+    if (!rawState || typeof rawState !== "object") {
+      return null;
+    }
+
+    if (Array.isArray(rawState.profiles) && rawState.profiles.length) {
+      const activeId = String(rawState.activeProfileId || "");
+      const activeProfile =
+        rawState.profiles.find((profile) => profile && profile.id === activeId) || rawState.profiles[0];
+      if (activeProfile && typeof activeProfile.settings === "object") {
+        return activeProfile.settings;
+      }
+    }
+
+    if ("preserveFilled" in rawState || "rules" in rawState) {
+      return rawState;
+    }
+
+    return null;
+  }
+
+  function getShortcutClickCount(rawSettings) {
+    const clickCount = Number(rawSettings?.shortcut?.clickCount);
+    return clickCount === 3 ? 3 : 2;
   }
 
   function showShortcutStatus(message, isError = false) {
@@ -288,6 +411,7 @@
   function fillForm(rawSettings) {
     const settings = normalizeSettings(rawSettings);
     const candidates = Array.from(document.querySelectorAll("input, textarea, select"));
+    lastFillSnapshot = captureFillSnapshot(candidates);
     const stats = { filled: 0, skipped: 0, errors: 0, details: [] };
     const processedRadioGroups = new Set();
 
@@ -382,6 +506,101 @@
     return stats;
   }
 
+  function captureFillSnapshot(elements) {
+    const snapshot = [];
+    for (const el of elements) {
+      if (!isFillableElement(el)) {
+        continue;
+      }
+
+      const nativeType = getNativeType(el);
+      const entry = {
+        el,
+        nativeType,
+        value: null,
+        checked: null,
+        multiple: false,
+        selectedValues: null,
+        fileHadValue: false
+      };
+
+      if (nativeType === "checkbox" || nativeType === "radio") {
+        entry.checked = Boolean(el.checked);
+      } else if (nativeType === "file") {
+        entry.fileHadValue = Boolean(el.files && el.files.length > 0);
+      } else if (el instanceof HTMLSelectElement && el.multiple) {
+        entry.multiple = true;
+        entry.selectedValues = Array.from(el.selectedOptions).map((option) => option.value);
+      } else {
+        entry.value = String(el.value ?? "");
+      }
+
+      snapshot.push(entry);
+    }
+
+    return snapshot;
+  }
+
+  function undoLastFill() {
+    if (!Array.isArray(lastFillSnapshot) || !lastFillSnapshot.length) {
+      return { restored: 0, skipped: 0, warnings: 0 };
+    }
+
+    const stats = { restored: 0, skipped: 0, warnings: 0 };
+
+    for (const entry of lastFillSnapshot) {
+      const outcome = restoreSnapshotEntry(entry);
+      if (outcome === "restored") {
+        stats.restored += 1;
+      } else if (outcome === "warning") {
+        stats.warnings += 1;
+      } else {
+        stats.skipped += 1;
+      }
+    }
+
+    lastFillSnapshot = null;
+    return stats;
+  }
+
+  function restoreSnapshotEntry(entry) {
+    if (!entry || !entry.el || !entry.el.isConnected) {
+      return "skipped";
+    }
+
+    const el = entry.el;
+    const nativeType = entry.nativeType;
+
+    if (nativeType === "checkbox" || nativeType === "radio") {
+      return setElementChecked(el, Boolean(entry.checked)) ? "restored" : "skipped";
+    }
+
+    if (nativeType === "file") {
+      if (entry.fileHadValue) {
+        return "warning";
+      }
+      return clearFileInput(el) ? "restored" : "warning";
+    }
+
+    if (el instanceof HTMLSelectElement && entry.multiple) {
+      const target = new Set(entry.selectedValues || []);
+      let changed = false;
+      for (const option of el.options) {
+        const shouldSelect = target.has(option.value);
+        if (option.selected !== shouldSelect) {
+          option.selected = shouldSelect;
+          changed = true;
+        }
+      }
+      if (changed) {
+        triggerFieldEvents(el);
+      }
+      return changed ? "restored" : "skipped";
+    }
+
+    return setElementValue(el, entry.value ?? "") ? "restored" : "skipped";
+  }
+
   function normalizeSettings(raw) {
     const merged = deepMerge(clone(DEFAULT_SETTINGS), raw || {});
 
@@ -391,6 +610,8 @@
     if (!["any", "future", "past"].includes(merged.date?.mode)) {
       merged.date.mode = DEFAULT_SETTINGS.date.mode;
     }
+
+    merged.shortcut.clickCount = merged.shortcut?.clickCount === 3 ? 3 : 2;
 
     merged.file.enabled = Boolean(merged.file?.enabled);
     if (!FILE_UPLOAD_TYPES.has(String(merged.file?.preferredType || "").toLowerCase())) {
@@ -1132,6 +1353,32 @@
         el.files = files;
       }
       return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function clearFileInput(el) {
+    if (!(el instanceof HTMLInputElement) || getNativeType(el) !== "file") {
+      return false;
+    }
+
+    const previousCount = el.files ? el.files.length : 0;
+    if (typeof window.DataTransfer === "function") {
+      const transfer = new DataTransfer();
+      if (applyNativeFilesSetter(el, transfer.files)) {
+        triggerFieldEvents(el);
+        const nextCount = el.files ? el.files.length : 0;
+        if (nextCount === 0 && previousCount !== nextCount) {
+          return true;
+        }
+      }
+    }
+
+    try {
+      applyNativeValueSetter(el, "");
+      triggerFieldEvents(el);
+      return previousCount > 0 || !el.value;
     } catch {
       return false;
     }

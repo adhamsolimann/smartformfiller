@@ -12,6 +12,8 @@ Suggested GitHub repository description:
 - Supports global constraints (date mode, text lengths, number ranges).
 - Supports per-field overrides via JSON rules.
 - Detects `input[type=file]` and can auto-attach generated mock files.
+- Supports reusable profiles (save and switch settings per project or scenario).
+- Includes one-click undo for the most recent fill operation on the current page.
 
 ## Supported Field Types
 
@@ -36,8 +38,11 @@ This extension is plain Manifest V3 JavaScript with no build step, so it can run
 
 1. Open a page with a form.
 2. Click the extension icon.
-3. Configure constraints in popup (optional).
-4. Click **Fill Current Form**.
+3. Pick or create a profile (optional).
+4. Configure constraints in popup (optional).
+5. Click **Fill Current Form**.
+
+To revert: click **Undo Last Fill** in the popup.
 
 ### Mouse Shortcut
 
@@ -53,6 +58,7 @@ This extension is plain Manifest V3 JavaScript with no build step, so it can run
 - `Text min/max length`
 - `Number mode`: `any`, `positive`, `negative`
 - `Number min/max`
+- `Mouse shortcut`: choose `2 clicks` or `3 clicks`
 - `Uploads`: enable/disable + preferred type (`Auto`, `PDF`, `JPG`, `PNG`, `DOCX`) + min/max generated file size (KB)
 
 ### Per-field rules JSON
