@@ -2,6 +2,8 @@
 
 Privacy-first Chrome/Brave extension that fills forms with realistic local test data, supports reusable profiles and constraints, and speeds up repetitive QA/PM workflows.
 
+Suggested GitHub repository description:
+`Privacy-first Chrome/Brave form filler for QA/PM teams with local data generation, profile presets, visual rule builder, collapsible UI, tab view, undo, configurable 2/3-click shortcuts, and upload-field support.`
 
 ## What It Does
 
@@ -15,6 +17,8 @@ Privacy-first Chrome/Brave extension that fills forms with realistic local test 
 - Includes one-click undo for the most recent fill operation on the current page.
 - Handles common split birthday inputs (`day`, `month`, `year`) and gender fields more reliably.
 - For dropdown/select fields, picks a random valid option by default.
+- Popup UI supports collapsible sections to reduce clutter.
+- Includes an `Open in New Tab` option for a wider, full-page settings view.
 
 ## Supported Field Types
 
@@ -46,9 +50,15 @@ This extension is plain Manifest V3 JavaScript with no build step, so it can run
 
 To revert: click **Undo Last Fill** in the popup.
 
+### UI Space Options
+
+- The popup uses collapsible sections so you can open only what you need.
+- Click **Open in New Tab** in the header to launch a full-width extension view with more space.
+
 ### Mouse Shortcut
 
-- Double-click (left mouse button) anywhere on the page to trigger fill.
+- Choose `2 clicks` (double-click) or `3 clicks` (triple-click) in popup settings.
+- Then click anywhere on the page with the selected count to trigger fill.
 - It uses your saved popup settings and shows a small toast with the fill result.
 
 ## Constraints

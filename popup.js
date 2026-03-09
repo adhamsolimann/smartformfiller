@@ -1,5 +1,8 @@
 const STORAGE_KEY_SETTINGS = "smartFormFillerSettings";
 const STORAGE_KEY_STATE = "smartFormFillerState";
+const STORAGE_KEY_UI_STATE = "smartFormFillerUiState";
+const TAB_VIEW_PARAM_KEY = "view";
+const TAB_VIEW_PARAM_VALUE = "tab";
 const DEFAULT_PROFILE_ID = "default";
 const FILE_TYPES = ["auto", "pdf", "jpg", "png", "docx"];
 
@@ -41,6 +44,19 @@ const DEFAULT_STATE = {
       settings: clone(DEFAULT_SETTINGS)
     }
   ]
+};
+
+const DEFAULT_UI_STATE = {
+  sections: {
+    profiles: true,
+    behavior: false,
+    text: false,
+    numbers: false,
+    dates: false,
+    uploads: false,
+    ruleBuilder: true,
+    advancedJson: false
+  }
 };
 
 const RULES_TEMPLATE = [
@@ -87,15 +103,20 @@ const RULES_TEMPLATE = [
 
 const refs = {};
 let appState = clone(DEFAULT_STATE);
+let uiState = clone(DEFAULT_UI_STATE);
 let currentRules = [];
 let editingRuleIndex = -1;
+let applyingUiState = false;
 
 document.addEventListener("DOMContentLoaded", initializePopup);
 
 async function initializePopup() {
   bindElements();
+  applyViewModeClass();
   bindEvents();
   clearRuleForm(false);
+  await loadUiState();
+  applyUiStateToSections();
 
   try {
     appState = await loadState();
@@ -167,13 +188,16 @@ function bindElements() {
   refs.clearAllRulesBtn = document.getElementById("clearAllRulesBtn");
   refs.rulesEmpty = document.getElementById("rulesEmpty");
   refs.rulesList = document.getElementById("rulesList");
+  refs.rulesCountBadge = document.getElementById("rulesCountBadge");
   refs.applyJsonRulesBtn = document.getElementById("applyJsonRulesBtn");
   refs.rulesJson = document.getElementById("rulesJson");
   refs.rulesJson.placeholder = JSON.stringify(RULES_TEMPLATE, null, 2);
+  refs.collapsibleSections = Array.from(document.querySelectorAll(".section.collapsible[data-section-id]"));
 
   refs.saveBtn = document.getElementById("saveBtn");
   refs.fillBtn = document.getElementById("fillBtn");
   refs.undoBtn = document.getElementById("undoBtn");
+  refs.openInTabBtn = document.getElementById("openInTabBtn");
   refs.status = document.getElementById("status");
 }
 
@@ -192,6 +216,51 @@ function bindEvents() {
   refs.saveBtn.addEventListener("click", onSaveClicked);
   refs.fillBtn.addEventListener("click", onFillClicked);
   refs.undoBtn.addEventListener("click", onUndoClicked);
+  if (refs.openInTabBtn) {
+    refs.openInTabBtn.addEventListener("click", onOpenInTabClicked);
+  }
+  for (const section of refs.collapsibleSections) {
+    section.addEventListener("toggle", onCollapsibleSectionToggled);
+  }
+}
+
+function applyViewModeClass() {
+  const tabView = isTabViewMode();
+  document.body.classList.toggle("tab-mode", tabView);
+  if (refs.openInTabBtn) {
+    refs.openInTabBtn.hidden = tabView;
+  }
+}
+
+function isTabViewMode() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.get(TAB_VIEW_PARAM_KEY) === TAB_VIEW_PARAM_VALUE;
+  } catch {
+    return false;
+  }
+}
+
+async function onOpenInTabClicked() {
+  if (!refs.openInTabBtn) {
+    return;
+  }
+
+  refs.openInTabBtn.disabled = true;
+  try {
+    await createTab(getTabViewUrl());
+    setStatus("Opened full view in new tab.");
+  } catch (error) {
+    setStatus(`Failed to open tab view: ${error.message}`, true);
+  } finally {
+    refs.openInTabBtn.disabled = false;
+  }
+}
+
+function getTabViewUrl() {
+  const url = new URL(chrome.runtime.getURL("popup.html"));
+  url.searchParams.set(TAB_VIEW_PARAM_KEY, TAB_VIEW_PARAM_VALUE);
+  return url.toString();
 }
 
 function renderProfiles() {
@@ -234,6 +303,79 @@ function syncProfileUiState() {
   const active = getActiveProfile();
   const isProtected = active.id === DEFAULT_PROFILE_ID || appState.profiles.length <= 1;
   refs.deleteProfileBtn.disabled = isProtected;
+}
+
+function applyUiStateToSections() {
+  if (!Array.isArray(refs.collapsibleSections) || !refs.collapsibleSections.length) {
+    return;
+  }
+
+  applyingUiState = true;
+  try {
+    for (const section of refs.collapsibleSections) {
+      const sectionId = section.dataset.sectionId;
+      if (!sectionId) {
+        continue;
+      }
+      if (Object.prototype.hasOwnProperty.call(uiState.sections, sectionId)) {
+        section.open = Boolean(uiState.sections[sectionId]);
+      }
+    }
+  } finally {
+    applyingUiState = false;
+  }
+}
+
+async function loadUiState() {
+  try {
+    const stored = await storageGet(STORAGE_KEY_UI_STATE);
+    uiState = normalizeUiState(stored);
+  } catch {
+    uiState = normalizeUiState(DEFAULT_UI_STATE);
+  }
+}
+
+function normalizeUiState(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const merged = deepMerge(clone(DEFAULT_UI_STATE), source);
+  const sections = {};
+
+  for (const [sectionId, fallback] of Object.entries(DEFAULT_UI_STATE.sections)) {
+    sections[sectionId] = Boolean(
+      merged.sections && Object.prototype.hasOwnProperty.call(merged.sections, sectionId)
+        ? merged.sections[sectionId]
+        : fallback
+    );
+  }
+
+  return { sections };
+}
+
+function onCollapsibleSectionToggled(event) {
+  if (applyingUiState) {
+    return;
+  }
+
+  const section = event.currentTarget;
+  if (!(section instanceof HTMLDetailsElement)) {
+    return;
+  }
+
+  const sectionId = section.dataset.sectionId;
+  if (!sectionId) {
+    return;
+  }
+
+  uiState.sections[sectionId] = section.open;
+  void persistUiState();
+}
+
+async function persistUiState() {
+  try {
+    await storageSetMany({ [STORAGE_KEY_UI_STATE]: uiState });
+  } catch {
+    // Ignore non-critical UI state persistence errors.
+  }
 }
 
 function onRuleConstraintKindChanged() {
@@ -417,6 +559,7 @@ function loadRuleIntoBuilder(index) {
 
   editingRuleIndex = index;
   refs.addRuleBtn.textContent = "Update Rule";
+  refs.clearRuleFormBtn.textContent = "Cancel Edit";
 
   refs.ruleSelector.value = rule.match?.selector || "";
   refs.ruleTypeMatch.value = Array.isArray(rule.match?.types) && rule.match.types.length ? String(rule.match.types[0]) : "any";
@@ -552,6 +695,14 @@ function parseFixedValue(raw) {
 function renderRulesList() {
   refs.rulesList.innerHTML = "";
   refs.rulesEmpty.classList.toggle("hidden", currentRules.length > 0);
+  if (refs.clearAllRulesBtn) {
+    refs.clearAllRulesBtn.disabled = currentRules.length === 0;
+  }
+  if (refs.rulesCountBadge) {
+    refs.rulesCountBadge.textContent = `${currentRules.length} rule${currentRules.length === 1 ? "" : "s"}`;
+  }
+
+  const fragment = document.createDocumentFragment();
 
   currentRules.forEach((rule, index) => {
     const li = document.createElement("li");
@@ -576,8 +727,10 @@ function renderRulesList() {
     li.appendChild(title);
     li.appendChild(subtitle);
     li.appendChild(actions);
-    refs.rulesList.appendChild(li);
+    fragment.appendChild(li);
   });
+
+  refs.rulesList.appendChild(fragment);
 }
 
 function summarizeMatch(match) {
@@ -633,6 +786,7 @@ function summarizeConstraint(constraints) {
 function clearRuleForm(updateStatus) {
   editingRuleIndex = -1;
   refs.addRuleBtn.textContent = "Add Rule";
+  refs.clearRuleFormBtn.textContent = "Clear Form";
 
   refs.ruleSelector.value = "";
   refs.ruleTypeMatch.value = "any";
@@ -1147,6 +1301,18 @@ function getActiveTab() {
         return;
       }
       resolve(tabs[0]);
+    });
+  });
+}
+
+function createTab(url) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.create({ url }, (tab) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(tab);
     });
   });
 }
