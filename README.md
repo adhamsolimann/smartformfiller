@@ -15,13 +15,15 @@ Suggested GitHub repository description:
 - Supports configurable mouse shortcut trigger (2-click or 3-click).
 - Supports reusable profiles (save and switch settings per project or scenario).
 - Includes one-click undo for the most recent fill operation on the current page.
+- Handles common split birthday inputs (`day`, `month`, `year`) and gender fields more reliably.
+- For dropdown/select fields, picks a random valid option by default.
 
 ## Supported Field Types
 
 - `input`: `text`, `email`, `tel`, `url`, `number`, `range`, `date`, `datetime-local`, `month`, `week`, `time`, `checkbox`, `radio`, `color`, `password`, `search`
 - `input[type=file]` (mock generated file upload)
 - `textarea`
-- `select`
+- `select` (random option selection by default)
 
 ## Install (Chrome or Brave)
 

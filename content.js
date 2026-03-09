@@ -155,6 +155,8 @@
     { type: "firstName", regex: /(first.?name|given.?name|fname)/i },
     { type: "lastName", regex: /(last.?name|surname|family.?name|lname)/i },
     { type: "fullName", regex: /(full.?name|contact.?name|your.?name)/i },
+    { type: "birthDate", regex: /(date.?of.?birth|dob|birthday|birth.?date)/i },
+    { type: "gender", regex: /(gender|sex)/i },
     { type: "email", regex: /(e-?mail)/i },
     { type: "phone", regex: /(phone|mobile|tel|telephone)/i },
     { type: "company", regex: /(company|organization|organisation|employer|business)/i },
@@ -179,6 +181,7 @@
   let currentShortcutClickCount = 2;
   let recentShortcutClicks = [];
   let lastFillSnapshot = null;
+  let activeFillContext = null;
 
   window.addEventListener("click", onDocumentClick, true);
   window.addEventListener("dblclick", onDocumentDoubleClick, true);
@@ -412,51 +415,84 @@
     const settings = normalizeSettings(rawSettings);
     const candidates = Array.from(document.querySelectorAll("input, textarea, select"));
     lastFillSnapshot = captureFillSnapshot(candidates);
+    activeFillContext = buildFillContext();
     const stats = { filled: 0, skipped: 0, errors: 0, details: [] };
     const processedRadioGroups = new Set();
 
-    for (const el of candidates) {
-      if (!isFillableElement(el)) {
-        continue;
-      }
-
-      const nativeType = getNativeType(el);
-      if (nativeType === "radio") {
-        const groupKey = getRadioGroupKey(el);
-        if (processedRadioGroups.has(groupKey)) {
-          continue;
-        }
-        processedRadioGroups.add(groupKey);
-
-        const radios = getRadioGroup(el).filter((radio) => isFillableElement(radio));
-        if (!radios.length) {
+    try {
+      for (const el of candidates) {
+        if (!isFillableElement(el)) {
           continue;
         }
 
-        if (settings.onlyVisible) {
-          const visible = radios.filter((radio) => isElementVisible(radio));
-          if (!visible.length) {
+        const nativeType = getNativeType(el);
+        if (nativeType === "radio") {
+          const groupKey = getRadioGroupKey(el);
+          if (processedRadioGroups.has(groupKey)) {
+            continue;
+          }
+          processedRadioGroups.add(groupKey);
+
+          const radios = getRadioGroup(el).filter((radio) => isFillableElement(radio));
+          if (!radios.length) {
+            continue;
+          }
+
+          if (settings.onlyVisible) {
+            const visible = radios.filter((radio) => isElementVisible(radio));
+            if (!visible.length) {
+              stats.skipped += 1;
+              continue;
+            }
+          }
+
+          if (settings.preserveFilled && radios.some((radio) => radio.checked)) {
             stats.skipped += 1;
             continue;
           }
+
+          try {
+            const seed = radios[0];
+            const descriptor = describeField(seed);
+            const constraints = resolveFieldConstraints(seed, descriptor, settings);
+            const target = chooseRadioFromGroup(radios, constraints, settings.onlyVisible, descriptor);
+            if (!target) {
+              stats.skipped += 1;
+              continue;
+            }
+
+            const changed = setElementChecked(target, true);
+            if (changed) {
+              stats.filled += 1;
+            } else {
+              stats.skipped += 1;
+            }
+          } catch (error) {
+            stats.errors += 1;
+            stats.details.push({
+              type: "radio",
+              id: radios[0]?.id || radios[0]?.name || "",
+              error: error instanceof Error ? error.message : "Radio group fill failed."
+            });
+          }
+
+          continue;
         }
 
-        if (settings.preserveFilled && radios.some((radio) => radio.checked)) {
+        if (settings.onlyVisible && !isElementVisible(el)) {
+          stats.skipped += 1;
+          continue;
+        }
+
+        if (settings.preserveFilled && hasFieldValue(el)) {
           stats.skipped += 1;
           continue;
         }
 
         try {
-          const seed = radios[0];
-          const descriptor = describeField(seed);
-          const constraints = resolveFieldConstraints(seed, descriptor, settings);
-          const target = chooseRadioFromGroup(radios, constraints, settings.onlyVisible);
-          if (!target) {
-            stats.skipped += 1;
-            continue;
-          }
-
-          const changed = setElementChecked(target, true);
+          const descriptor = describeField(el);
+          const constraints = resolveFieldConstraints(el, descriptor, settings);
+          const changed = fillSingleField(el, descriptor, constraints);
           if (changed) {
             stats.filled += 1;
           } else {
@@ -465,45 +501,23 @@
         } catch (error) {
           stats.errors += 1;
           stats.details.push({
-            type: "radio",
-            id: radios[0]?.id || radios[0]?.name || "",
-            error: error instanceof Error ? error.message : "Radio group fill failed."
+            type: nativeType,
+            id: el.id || el.name || "",
+            error: error instanceof Error ? error.message : "Field fill failed."
           });
         }
-
-        continue;
       }
-
-      if (settings.onlyVisible && !isElementVisible(el)) {
-        stats.skipped += 1;
-        continue;
-      }
-
-      if (settings.preserveFilled && hasFieldValue(el)) {
-        stats.skipped += 1;
-        continue;
-      }
-
-      try {
-        const descriptor = describeField(el);
-        const constraints = resolveFieldConstraints(el, descriptor, settings);
-        const changed = fillSingleField(el, descriptor, constraints);
-        if (changed) {
-          stats.filled += 1;
-        } else {
-          stats.skipped += 1;
-        }
-      } catch (error) {
-        stats.errors += 1;
-        stats.details.push({
-          type: nativeType,
-          id: el.id || el.name || "",
-          error: error instanceof Error ? error.message : "Field fill failed."
-        });
-      }
+    } finally {
+      activeFillContext = null;
     }
 
     return stats;
+  }
+
+  function buildFillContext() {
+    return {
+      birthdayDate: generateBirthdayDateSeed()
+    };
   }
 
   function captureFillSnapshot(elements) {
@@ -516,18 +530,21 @@
       const nativeType = getNativeType(el);
       const entry = {
         el,
+        snapshotMeta: buildSnapshotMeta(el, nativeType),
         nativeType,
         value: null,
         checked: null,
         multiple: false,
         selectedValues: null,
-        fileHadValue: false
+        fileHadValue: false,
+        fileSignature: []
       };
 
       if (nativeType === "checkbox" || nativeType === "radio") {
         entry.checked = Boolean(el.checked);
       } else if (nativeType === "file") {
         entry.fileHadValue = Boolean(el.files && el.files.length > 0);
+        entry.fileSignature = snapshotFileSignature(el.files);
       } else if (el instanceof HTMLSelectElement && el.multiple) {
         entry.multiple = true;
         entry.selectedValues = Array.from(el.selectedOptions).map((option) => option.value);
@@ -539,6 +556,83 @@
     }
 
     return snapshot;
+  }
+
+  function buildSnapshotMeta(el, nativeType) {
+    return {
+      id: String(el.id || ""),
+      name: String(el.getAttribute("name") || ""),
+      tag: el.tagName.toLowerCase(),
+      nativeType,
+      matchIndex: getFieldMatchIndex(el, nativeType)
+    };
+  }
+
+  function getFieldMatchIndex(el, nativeType) {
+    const candidates = queryFieldsForSnapshot(nativeType, String(el.getAttribute("name") || ""), String(el.id || ""));
+    if (!candidates.length) {
+      return 0;
+    }
+    const index = candidates.indexOf(el);
+    return index >= 0 ? index : 0;
+  }
+
+  function queryFieldsForSnapshot(nativeType, name, id) {
+    if (id) {
+      const escapedId = cssEscape(id);
+      if (escapedId) {
+        const idEl = document.querySelector(`#${escapedId}`);
+        if (idEl) {
+          return [idEl];
+        }
+      }
+    }
+
+    const lowerType = String(nativeType || "").toLowerCase();
+    if (lowerType === "textarea") {
+      if (name) {
+        return Array.from(document.querySelectorAll(`textarea[name="${cssEscape(name)}"]`));
+      }
+      return Array.from(document.querySelectorAll("textarea"));
+    }
+
+    if (lowerType === "select") {
+      if (name) {
+        return Array.from(document.querySelectorAll(`select[name="${cssEscape(name)}"]`));
+      }
+      return Array.from(document.querySelectorAll("select"));
+    }
+
+    const escapedType = cssEscape(lowerType || "text");
+    if (name) {
+      return Array.from(document.querySelectorAll(`input[type="${escapedType}"][name="${cssEscape(name)}"]`));
+    }
+    return Array.from(document.querySelectorAll(`input[type="${escapedType}"]`));
+  }
+
+  function resolveSnapshotElement(entry) {
+    if (!entry || !entry.el) {
+      return null;
+    }
+    if (entry.el.isConnected) {
+      return entry.el;
+    }
+
+    const meta = entry.snapshotMeta;
+    if (!meta || typeof meta !== "object") {
+      return null;
+    }
+
+    const candidates = queryFieldsForSnapshot(meta.nativeType, meta.name || "", meta.id || "");
+    if (!candidates.length) {
+      return null;
+    }
+
+    const matchIndex = Number(meta.matchIndex);
+    if (Number.isInteger(matchIndex) && matchIndex >= 0 && matchIndex < candidates.length) {
+      return candidates[matchIndex];
+    }
+    return candidates[0];
   }
 
   function undoLastFill() {
@@ -564,11 +658,10 @@
   }
 
   function restoreSnapshotEntry(entry) {
-    if (!entry || !entry.el || !entry.el.isConnected) {
+    const el = resolveSnapshotElement(entry);
+    if (!entry || !el) {
       return "skipped";
     }
-
-    const el = entry.el;
     const nativeType = entry.nativeType;
 
     if (nativeType === "checkbox" || nativeType === "radio") {
@@ -576,10 +669,19 @@
     }
 
     if (nativeType === "file") {
-      if (entry.fileHadValue) {
+      const before = Array.isArray(entry.fileSignature) ? entry.fileSignature : [];
+      const now = snapshotFileSignature(el.files);
+      if (areFileSignaturesEqual(before, now)) {
+        return "skipped";
+      }
+
+      const cleared = clearFileInput(el);
+      if (!cleared) {
         return "warning";
       }
-      return clearFileInput(el) ? "restored" : "warning";
+
+      // If the field had files before fill, browser security prevents restoring them.
+      return entry.fileHadValue ? "warning" : "restored";
     }
 
     if (el instanceof HTMLSelectElement && entry.multiple) {
@@ -654,7 +756,7 @@
     }
 
     if (el instanceof HTMLSelectElement) {
-      const selectValue = generateSelectValue(el, constraints);
+      const selectValue = generateSelectValue(el, constraints, descriptor);
       return setElementValue(el, selectValue);
     }
 
@@ -665,12 +767,12 @@
     }
 
     if (DATE_INPUT_TYPES.has(nativeType)) {
-      const dateValue = generateDateValue(el, nativeType, constraints.date);
+      const dateValue = generateDateValue(el, nativeType, constraints.date, descriptor);
       return setElementValue(el, dateValue);
     }
 
     if (nativeType === "number" || nativeType === "range") {
-      const numberValue = generateNumberValue(el, constraints.number);
+      const numberValue = generateNumberValue(el, constraints.number, descriptor);
       return setElementValue(el, numberValue);
     }
 
@@ -718,7 +820,7 @@
     return setElementValue(el, fixedValue);
   }
 
-  function chooseRadioFromGroup(radios, constraints, onlyVisible) {
+  function chooseRadioFromGroup(radios, constraints, onlyVisible, descriptor) {
     const candidates = onlyVisible ? radios.filter((radio) => isElementVisible(radio)) : radios;
     if (!candidates.length) {
       return null;
@@ -741,6 +843,13 @@
       });
       if (matched) {
         return matched;
+      }
+    }
+
+    if (descriptor?.semanticType === "gender") {
+      const genderMatched = chooseGenderOptionFromInputs(candidates);
+      if (genderMatched) {
+        return genderMatched;
       }
     }
 
@@ -852,7 +961,7 @@
   function describeField(el) {
     const nativeType = getNativeType(el);
     const context = collectFieldContext(el);
-    const semanticType = inferSemanticType(context, nativeType);
+    const semanticType = inferSemanticType(context, nativeType, el);
 
     return {
       nativeType,
@@ -871,7 +980,8 @@
       el.getAttribute("aria-label"),
       el.getAttribute("title"),
       el.getAttribute("autocomplete"),
-      getLabelText(el)
+      getLabelText(el),
+      getNearbyFieldHint(el)
     ]
       .filter(Boolean)
       .map((value) => String(value).toLowerCase().trim());
@@ -900,7 +1010,47 @@
     return texts.join(" ").replace(/\s+/g, " ").trim();
   }
 
-  function inferSemanticType(context, nativeType) {
+  function getNearbyFieldHint(el) {
+    let node = el.parentElement;
+    let steps = 0;
+
+    while (node && steps < 3) {
+      const raw = String(node.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+
+      if (raw.length >= 4 && raw.length <= 220 && /(birthday|dob|date of birth|gender|sex|day|month|year)/.test(raw)) {
+        return raw;
+      }
+
+      node = node.parentElement;
+      steps += 1;
+    }
+
+    return "";
+  }
+
+  function inferSemanticType(context, nativeType, el) {
+    const normalized = String(context || "").toLowerCase();
+    const hasBirthKeyword = /(date.?of.?birth|birth.?date|birthday|dob)/.test(normalized);
+    const splitBirthday = hasBirthKeyword || isLikelySplitBirthdayGroup(el);
+
+    if (splitBirthday) {
+      if (/\b(day|dd)\b/.test(normalized)) {
+        return "birthDay";
+      }
+      if (/\b(month|mm)\b/.test(normalized)) {
+        return "birthMonth";
+      }
+      if (/\b(year|yyyy|yy)\b/.test(normalized)) {
+        return "birthYear";
+      }
+      if (DATE_INPUT_TYPES.has(nativeType)) {
+        return "birthDate";
+      }
+    }
+
     if (nativeType === "file") {
       return "file";
     }
@@ -916,9 +1066,6 @@
     if (nativeType === "password") {
       return "password";
     }
-    if (nativeType === "number" || nativeType === "range") {
-      return "quantity";
-    }
     if (nativeType === "textarea") {
       return "description";
     }
@@ -932,7 +1079,33 @@
       }
     }
 
+    if (nativeType === "number" || nativeType === "range") {
+      return "quantity";
+    }
+
     return "text";
+  }
+
+  function isLikelySplitBirthdayGroup(el) {
+    if (!el) {
+      return false;
+    }
+
+    const scope =
+      el.closest("fieldset, [role='group'], [aria-label], [data-testid], .form-group, .input-group, .row") ||
+      el.parentElement;
+    if (!scope) {
+      return false;
+    }
+
+    const text = String(scope.textContent || "")
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+
+    const hasBirthdayWord = /(birthday|date of birth|birth date|dob)/.test(text);
+    const hasParts = /\bday\b/.test(text) && /\bmonth\b/.test(text) && /\byear\b/.test(text);
+
+    return hasBirthdayWord || hasParts;
   }
 
   function generateTextValue(el, descriptor, textConstraints) {
@@ -963,6 +1136,16 @@
         return pick(LAST_NAMES);
       case "fullName":
         return `${pick(FIRST_NAMES)} ${pick(LAST_NAMES)}`;
+      case "birthDay":
+        return String(getBirthdayDateForRun().getDate());
+      case "birthMonth":
+        return String(getBirthdayDateForRun().getMonth() + 1);
+      case "birthYear":
+        return String(getBirthdayDateForRun().getFullYear());
+      case "birthDate":
+        return formatDate(getBirthdayDateForRun());
+      case "gender":
+        return pick(["male", "female", "other"]);
       case "email":
         return generateEmailValue(el);
       case "phone":
@@ -1000,7 +1183,7 @@
     }
   }
 
-  function generateNumberValue(el, numberConstraints) {
+  function generateNumberValue(el, numberConstraints, descriptor) {
     const constraints = numberConstraints || {};
 
     const attrMin = parseFiniteNumber(el.getAttribute("min"));
@@ -1036,7 +1219,17 @@
     }
 
     const step = parseStep(el.getAttribute("step"));
-    const rawValue = randomFloat(min, max);
+    const semanticType = descriptor?.semanticType || "";
+    let preferredValue = null;
+    if (semanticType === "birthDay") {
+      preferredValue = getBirthdayDateForRun().getDate();
+    } else if (semanticType === "birthMonth") {
+      preferredValue = getBirthdayDateForRun().getMonth() + 1;
+    } else if (semanticType === "birthYear") {
+      preferredValue = getBirthdayDateForRun().getFullYear();
+    }
+
+    const rawValue = Number.isFinite(preferredValue) ? preferredValue : randomFloat(min, max);
     let value = step ? alignToStep(rawValue, min, step) : rawValue;
     value = clamp(value, min, max);
 
@@ -1044,20 +1237,41 @@
     return formatNumber(value, precision);
   }
 
-  function generateDateValue(el, nativeType, dateConstraints) {
+  function generateDateValue(el, nativeType, dateConstraints, descriptor) {
+    const semanticType = descriptor?.semanticType || "";
+    const isBirthdayField = semanticType === "birthDate" || semanticType === "birthDay" || semanticType === "birthMonth" || semanticType === "birthYear";
+
+    if (isBirthdayField) {
+      let birthday = getBirthdayDateForRun();
+      const today = startOfDay(new Date());
+
+      // Birthday fields must be in the past.
+      if (birthday >= today) {
+        birthday = addDays(today, -1);
+      }
+
+      if (nativeType === "datetime-local") {
+        const withTime = withRandomTime(birthday);
+        return formatDateTimeLocal(clampDateForInput(withTime, nativeType, el));
+      }
+      if (nativeType === "month") {
+        return formatMonth(clampDateForInput(birthday, nativeType, el));
+      }
+      if (nativeType === "week") {
+        return formatIsoWeek(clampDateForInput(birthday, nativeType, el));
+      }
+      if (nativeType === "time") {
+        return generateTimeValue(el);
+      }
+      return formatDate(clampDateForInput(birthday, nativeType, el));
+    }
+
     if (nativeType === "datetime-local") {
       const offsetRange = resolveDateOffsetRange(dateConstraints || {});
       let date = addDays(startOfDay(new Date()), randomInt(offsetRange.min, offsetRange.max));
       date = withRandomTime(date);
 
-      const minAttr = parseDateLike(nativeType, el.getAttribute("min"));
-      const maxAttr = parseDateLike(nativeType, el.getAttribute("max"));
-      if (minAttr && date < minAttr) {
-        date = minAttr;
-      }
-      if (maxAttr && date > maxAttr) {
-        date = maxAttr;
-      }
+      date = clampDateForInput(date, nativeType, el);
       return formatDateTimeLocal(date);
     }
 
@@ -1066,6 +1280,7 @@
     }
 
     let date = pickConstrainedDate(el, nativeType, dateConstraints || {});
+    date = clampDateForInput(date, nativeType, el);
     if (nativeType === "month") {
       return formatMonth(date);
     }
@@ -1079,15 +1294,21 @@
     const offsetRange = resolveDateOffsetRange(dateConstraints);
     let candidate = addDays(startOfDay(new Date()), randomInt(offsetRange.min, offsetRange.max));
 
+    candidate = clampDateForInput(candidate, nativeType, el);
+    return candidate;
+  }
+
+  function clampDateForInput(candidate, nativeType, el) {
+    let date = new Date(candidate);
     const minAttr = parseDateLike(nativeType, el.getAttribute("min"));
     const maxAttr = parseDateLike(nativeType, el.getAttribute("max"));
-    if (minAttr && candidate < minAttr) {
-      candidate = minAttr;
+    if (minAttr && date < minAttr) {
+      date = minAttr;
     }
-    if (maxAttr && candidate > maxAttr) {
-      candidate = maxAttr;
+    if (maxAttr && date > maxAttr) {
+      date = maxAttr;
     }
-    return candidate;
+    return date;
   }
 
   function resolveDateOffsetRange(dateConstraints) {
@@ -1131,7 +1352,7 @@
     return `${pad2(hours)}:${pad2(minutes)}`;
   }
 
-  function generateSelectValue(select, constraints) {
+  function generateSelectValue(select, constraints, descriptor) {
     const options = Array.from(select.options).filter((option) => !option.disabled);
     if (!options.length) {
       return "";
@@ -1150,12 +1371,100 @@
       }
     }
 
+    if (descriptor?.semanticType === "gender") {
+      const genderOption = chooseGenderOptionFromSelect(options);
+      if (genderOption) {
+        return genderOption.value;
+      }
+    }
+
+    const birthdayOption = chooseBirthdayOptionFromSelect(options, descriptor?.semanticType || "");
+    if (birthdayOption) {
+      return birthdayOption.value;
+    }
+
     const preferred = constraints.select?.preferNonPlaceholder
       ? options.filter((option) => !isPlaceholderOption(option))
       : options;
 
     const pool = preferred.length ? preferred : options;
     return pick(pool).value;
+  }
+
+  function chooseBirthdayOptionFromSelect(options, semanticType) {
+    if (!semanticType || !["birthDay", "birthMonth", "birthYear"].includes(semanticType)) {
+      return null;
+    }
+
+    const birthDate = getBirthdayDateForRun();
+    let targetNumber = null;
+    let textAliases = [];
+
+    if (semanticType === "birthDay") {
+      targetNumber = birthDate.getDate();
+      textAliases = [String(targetNumber), pad2(targetNumber)];
+    } else if (semanticType === "birthMonth") {
+      targetNumber = birthDate.getMonth() + 1;
+      const monthIndex = birthDate.getMonth();
+      const monthFull = birthDate.toLocaleString("en", { month: "long" }).toLowerCase();
+      const monthShort = birthDate.toLocaleString("en", { month: "short" }).toLowerCase();
+      textAliases = [String(targetNumber), pad2(targetNumber), monthFull, monthShort, String(monthIndex + 1)];
+    } else if (semanticType === "birthYear") {
+      targetNumber = birthDate.getFullYear();
+      textAliases = [String(targetNumber), String(targetNumber).slice(-2)];
+    }
+
+    const normalizedAliases = new Set(textAliases.map((value) => String(value).toLowerCase()));
+    return (
+      options.find((option) => {
+        const value = String(option.value || "").trim().toLowerCase();
+        const text = String(option.textContent || "").trim().toLowerCase();
+        return normalizedAliases.has(value) || normalizedAliases.has(text);
+      }) || null
+    );
+  }
+
+  function chooseGenderOptionFromSelect(options) {
+    const candidates = options.filter((option) => !isPlaceholderOption(option));
+    return chooseGenderEntry(candidates, (option) => `${option.value} ${option.textContent || ""}`);
+  }
+
+  function chooseGenderOptionFromInputs(radios) {
+    return chooseGenderEntry(radios, (radio) => `${radio.value || ""} ${getLabelText(radio)}`);
+  }
+
+  function chooseGenderEntry(entries, tokenGetter) {
+    if (!entries.length) {
+      return null;
+    }
+
+    const buckets = {
+      male: [],
+      female: [],
+      nonBinary: [],
+      other: []
+    };
+
+    for (const entry of entries) {
+      const token = String(tokenGetter(entry) || "").toLowerCase();
+      if (/\b(male|man|m)\b/.test(token)) {
+        buckets.male.push(entry);
+      } else if (/\b(female|woman|f)\b/.test(token)) {
+        buckets.female.push(entry);
+      } else if (/(non[- ]?binary|nb|other|prefer not|rather not)/.test(token)) {
+        buckets.nonBinary.push(entry);
+      } else if (/gender|sex/.test(token)) {
+        buckets.other.push(entry);
+      }
+    }
+
+    const prioritizedGroups = [buckets.male, buckets.female, buckets.nonBinary, buckets.other];
+    const available = prioritizedGroups.filter((group) => group.length);
+    if (available.length) {
+      return pick(pick(available));
+    }
+
+    return null;
   }
 
   function fillFileInput(el, fileConstraints) {
@@ -1363,25 +1672,134 @@
       return false;
     }
 
-    const previousCount = el.files ? el.files.length : 0;
+    if (isFileInputEmpty(el)) {
+      return true;
+    }
+
+    // Strategy 1: assign an empty FileList via DataTransfer.
     if (typeof window.DataTransfer === "function") {
-      const transfer = new DataTransfer();
-      if (applyNativeFilesSetter(el, transfer.files)) {
-        triggerFieldEvents(el);
-        const nextCount = el.files ? el.files.length : 0;
-        if (nextCount === 0 && previousCount !== nextCount) {
+      try {
+        const transfer = new DataTransfer();
+        if (applyNativeFilesSetter(el, transfer.files) && isFileInputEmpty(el)) {
+          triggerFieldEvents(el);
           return true;
         }
+      } catch {
+        // Continue with fallbacks.
       }
     }
 
+    // Strategy 2: clear value via native setter/direct assignment.
     try {
       applyNativeValueSetter(el, "");
-      triggerFieldEvents(el);
-      return previousCount > 0 || !el.value;
+      if (!isFileInputEmpty(el)) {
+        el.value = "";
+      }
+      if (isFileInputEmpty(el)) {
+        triggerFieldEvents(el);
+        return true;
+      }
+    } catch {
+      // Continue with fallback.
+    }
+
+    // Strategy 3: type toggle reset, then restore key attributes.
+    try {
+      const accept = el.getAttribute("accept");
+      const multiple = el.multiple;
+      const capture = el.getAttribute("capture");
+      const webkitdirectory = el.hasAttribute("webkitdirectory");
+
+      el.type = "text";
+      el.type = "file";
+
+      if (accept !== null) {
+        el.setAttribute("accept", accept);
+      } else {
+        el.removeAttribute("accept");
+      }
+      el.multiple = multiple;
+      if (capture !== null) {
+        el.setAttribute("capture", capture);
+      } else {
+        el.removeAttribute("capture");
+      }
+      if (webkitdirectory) {
+        el.setAttribute("webkitdirectory", "");
+      } else {
+        el.removeAttribute("webkitdirectory");
+      }
+
+      if (isFileInputEmpty(el)) {
+        triggerFieldEvents(el);
+        return true;
+      }
+    } catch {
+      // Continue with fallback.
+    }
+
+    // Strategy 4: temporary form reset while keeping the same node reference.
+    try {
+      const marker = document.createComment("smart-form-filler-file-marker");
+      const parent = el.parentNode;
+      if (!parent) {
+        return false;
+      }
+      parent.insertBefore(marker, el);
+
+      const tempForm = document.createElement("form");
+      tempForm.style.display = "none";
+      document.body.appendChild(tempForm);
+      tempForm.appendChild(el);
+      tempForm.reset();
+
+      parent.insertBefore(el, marker);
+      marker.remove();
+      tempForm.remove();
+
+      if (isFileInputEmpty(el)) {
+        triggerFieldEvents(el);
+        return true;
+      }
     } catch {
       return false;
     }
+
+    return false;
+  }
+
+  function isFileInputEmpty(el) {
+    return !el.files || el.files.length === 0;
+  }
+
+  function snapshotFileSignature(files) {
+    if (!files || typeof files.length !== "number" || files.length <= 0) {
+      return [];
+    }
+
+    const signature = [];
+    for (const file of Array.from(files)) {
+      if (!file) {
+        continue;
+      }
+      signature.push(`${file.name}|${file.size}|${file.type}|${file.lastModified}`);
+    }
+    return signature;
+  }
+
+  function areFileSignaturesEqual(a, b) {
+    if (a === b) {
+      return true;
+    }
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i]) {
+        return false;
+      }
+    }
+    return true;
   }
 
   function parseAcceptTokens(acceptValue) {
@@ -1496,8 +1914,8 @@
   }
 
   function triggerFieldEvents(el) {
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
+    el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
   }
 
   function getNativeType(el) {
@@ -1991,6 +2409,28 @@
     const copy = new Date(value);
     copy.setDate(copy.getDate() + days);
     return copy;
+  }
+
+  function getBirthdayDateForRun() {
+    if (activeFillContext?.birthdayDate instanceof Date) {
+      return activeFillContext.birthdayDate;
+    }
+
+    const fallback = generateBirthdayDateSeed();
+    if (activeFillContext) {
+      activeFillContext.birthdayDate = fallback;
+    }
+    return fallback;
+  }
+
+  function generateBirthdayDateSeed() {
+    const today = new Date();
+    const age = randomInt(18, 70);
+    const year = today.getFullYear() - age;
+    const month = randomInt(0, 11);
+    const maxDay = new Date(year, month + 1, 0).getDate();
+    const day = randomInt(1, maxDay);
+    return new Date(year, month, day);
   }
 
   function parseTimeToMinutes(value) {
