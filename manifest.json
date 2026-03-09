@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Smart Form Filler",
+  "description": "Fast local dummy form data generator for testers and product managers.",
+  "version": "0.1.0",
+  "action": {
+    "default_title": "Smart Form Filler",
+    "default_popup": "popup.html"
+  },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "minimum_chrome_version": "109"
+}

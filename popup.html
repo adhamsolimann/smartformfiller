@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Smart Form Filler</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <header class="panel-header">
+        <h1>Smart Form Filler</h1>
+        <p>Fill repetitive forms instantly with local test data.</p>
+      </header>
+
+      <section class="section">
+        <h2>Behavior</h2>
+        <label class="toggle">
+          <input id="preserveFilled" type="checkbox" />
+          Skip already-filled fields
+        </label>
+        <label class="toggle">
+          <input id="onlyVisible" type="checkbox" />
+          Fill only visible fields
+        </label>
+        <label class="toggle">
+          <input id="fileEnabled" type="checkbox" />
+          Auto-fill upload fields
+        </label>
+      </section>
+
+      <section class="section two-col">
+        <h2>Text</h2>
+        <label>
+          Min length
+          <input id="textMinLength" type="number" min="0" step="1" />
+        </label>
+        <label>
+          Max length
+          <input id="textMaxLength" type="number" min="1" step="1" />
+        </label>
+      </section>
+
+      <section class="section two-col">
+        <h2>Numbers</h2>
+        <label>
+          Mode
+          <select id="numberMode">
+            <option value="any">Any</option>
+            <option value="positive">Positive</option>
+            <option value="negative">Negative</option>
+          </select>
+        </label>
+        <label>
+          Min
+          <input id="numberMin" type="number" step="any" />
+        </label>
+        <label>
+          Max
+          <input id="numberMax" type="number" step="any" />
+        </label>
+      </section>
+
+      <section class="section two-col">
+        <h2>Dates</h2>
+        <label>
+          Mode
+          <select id="dateMode">
+            <option value="any">Any</option>
+            <option value="future">Future only</option>
+            <option value="past">Past only</option>
+          </select>
+        </label>
+        <label>
+          Min days from today
+          <input id="dateMinDays" type="number" step="1" />
+        </label>
+        <label>
+          Max days from today
+          <input id="dateMaxDays" type="number" step="1" />
+        </label>
+      </section>
+
+      <section class="section two-col">
+        <h2>Uploads</h2>
+        <label>
+          Type
+          <select id="fileType">
+            <option value="auto">Auto (use field accept)</option>
+            <option value="pdf">PDF</option>
+            <option value="jpg">JPG</option>
+            <option value="png">PNG</option>
+            <option value="docx">DOCX</option>
+          </select>
+        </label>
+        <label>
+          Min size (KB)
+          <input id="fileMinSizeKB" type="number" min="1" step="1" />
+        </label>
+        <label>
+          Max size (KB)
+          <input id="fileMaxSizeKB" type="number" min="1" step="1" />
+        </label>
+      </section>
+
+      <section class="section">
+        <h2>Per-Field Rules (JSON)</h2>
+        <textarea id="rulesJson" spellcheck="false"></textarea>
+        <p class="hint">
+          Target fields with selectors, names, types, or keywords to override global constraints (including uploads).
+        </p>
+      </section>
+
+      <footer class="actions">
+        <button id="saveBtn" class="secondary">Save Settings</button>
+        <button id="fillBtn" class="primary">Fill Current Form</button>
+      </footer>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
