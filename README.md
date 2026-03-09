@@ -10,7 +10,7 @@ Suggested GitHub repository description:
 - Fills forms locally (no AI provider calls, no external network dependency).
 - Infers data by field type and field semantics (`name`, `id`, `label`, `placeholder`).
 - Supports global constraints (date mode, text lengths, number ranges).
-- Supports per-field overrides via JSON rules.
+- Supports per-field overrides with a visual Rule Builder UI (and optional advanced JSON).
 - Detects `input[type=file]` and can auto-attach generated mock files.
 - Supports configurable mouse shortcut trigger (2-click or 3-click).
 - Supports reusable profiles (save and switch settings per project or scenario).
@@ -43,7 +43,8 @@ This extension is plain Manifest V3 JavaScript with no build step, so it can run
 2. Click the extension icon.
 3. Pick or create a profile (optional).
 4. Configure constraints in popup (optional).
-5. Click **Fill Current Form**.
+5. Add per-field rules in **Rule Builder** if needed (optional).
+6. Click **Fill Current Form**.
 
 To revert: click **Undo Last Fill** in the popup.
 
@@ -67,6 +68,7 @@ To revert: click **Undo Last Fill** in the popup.
 ### Per-field rules JSON
 
 Rules are evaluated in order. Matching rules override global settings.
+You can create/edit these in the Rule Builder UI, then use JSON only for advanced edits.
 
 ```json
 [
@@ -106,6 +108,28 @@ Rules are evaluated in order. Matching rules override global settings.
         "maxSizeKB": 200,
         "mime": "application/pdf",
         "extension": ".pdf"
+      }
+    }
+  },
+  {
+    "match": {
+      "types": ["checkbox"],
+      "keywords": ["terms", "consent"]
+    },
+    "constraints": {
+      "checkbox": {
+        "checked": true
+      }
+    }
+  },
+  {
+    "match": {
+      "types": ["select"],
+      "names": ["country"]
+    },
+    "constraints": {
+      "select": {
+        "preferNonPlaceholder": true
       }
     }
   }

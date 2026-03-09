@@ -134,6 +134,72 @@ textarea {
   min-width: 0;
 }
 
+.rule-builder-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.rule-constraint {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #d8dce6;
+  border-radius: 10px;
+  background: #fafcff;
+}
+
+.rule-constraint-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.rule-builder-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rules-list {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.rule-item {
+  border: 1px solid #d7dbe5;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.rule-item-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #243042;
+}
+
+.rule-item-subtitle {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #5f6877;
+  line-height: 1.35;
+}
+
+.rule-item-actions {
+  margin-top: 7px;
+  display: flex;
+  gap: 6px;
+}
+
+.hidden {
+  display: none !important;
+}
+
 button.compact {
   min-height: 34px;
   padding: 0 10px;

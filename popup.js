@@ -87,12 +87,15 @@ const RULES_TEMPLATE = [
 
 const refs = {};
 let appState = clone(DEFAULT_STATE);
+let currentRules = [];
+let editingRuleIndex = -1;
 
 document.addEventListener("DOMContentLoaded", initializePopup);
 
 async function initializePopup() {
   bindElements();
   bindEvents();
+  clearRuleForm(false);
 
   try {
     appState = await loadState();
@@ -132,7 +135,41 @@ function bindElements() {
   refs.dateMode = document.getElementById("dateMode");
   refs.dateMinDays = document.getElementById("dateMinDays");
   refs.dateMaxDays = document.getElementById("dateMaxDays");
+
+  refs.ruleSelector = document.getElementById("ruleSelector");
+  refs.ruleTypeMatch = document.getElementById("ruleTypeMatch");
+  refs.ruleNames = document.getElementById("ruleNames");
+  refs.ruleKeywords = document.getElementById("ruleKeywords");
+  refs.ruleRequired = document.getElementById("ruleRequired");
+  refs.ruleConstraintKind = document.getElementById("ruleConstraintKind");
+  refs.ruleDateFields = document.getElementById("ruleDateFields");
+  refs.ruleNumberFields = document.getElementById("ruleNumberFields");
+  refs.ruleFileFields = document.getElementById("ruleFileFields");
+  refs.ruleCheckboxFields = document.getElementById("ruleCheckboxFields");
+  refs.ruleSelectFields = document.getElementById("ruleSelectFields");
+  refs.ruleFixedFields = document.getElementById("ruleFixedFields");
+  refs.ruleDateMode = document.getElementById("ruleDateMode");
+  refs.ruleDateMinDays = document.getElementById("ruleDateMinDays");
+  refs.ruleDateMaxDays = document.getElementById("ruleDateMaxDays");
+  refs.ruleNumberMode = document.getElementById("ruleNumberMode");
+  refs.ruleNumberMin = document.getElementById("ruleNumberMin");
+  refs.ruleNumberMax = document.getElementById("ruleNumberMax");
+  refs.ruleFileType = document.getElementById("ruleFileType");
+  refs.ruleFileMinKB = document.getElementById("ruleFileMinKB");
+  refs.ruleFileMaxKB = document.getElementById("ruleFileMaxKB");
+  refs.ruleFileMime = document.getElementById("ruleFileMime");
+  refs.ruleFileExtension = document.getElementById("ruleFileExtension");
+  refs.ruleCheckboxChecked = document.getElementById("ruleCheckboxChecked");
+  refs.ruleSelectPrefer = document.getElementById("ruleSelectPrefer");
+  refs.ruleFixedValue = document.getElementById("ruleFixedValue");
+  refs.addRuleBtn = document.getElementById("addRuleBtn");
+  refs.clearRuleFormBtn = document.getElementById("clearRuleFormBtn");
+  refs.clearAllRulesBtn = document.getElementById("clearAllRulesBtn");
+  refs.rulesEmpty = document.getElementById("rulesEmpty");
+  refs.rulesList = document.getElementById("rulesList");
+  refs.applyJsonRulesBtn = document.getElementById("applyJsonRulesBtn");
   refs.rulesJson = document.getElementById("rulesJson");
+  refs.rulesJson.placeholder = JSON.stringify(RULES_TEMPLATE, null, 2);
 
   refs.saveBtn = document.getElementById("saveBtn");
   refs.fillBtn = document.getElementById("fillBtn");
@@ -144,6 +181,14 @@ function bindEvents() {
   refs.profileSelect.addEventListener("change", onProfileSelected);
   refs.saveProfileBtn.addEventListener("click", onSaveProfileClicked);
   refs.deleteProfileBtn.addEventListener("click", onDeleteProfileClicked);
+
+  refs.ruleConstraintKind.addEventListener("change", onRuleConstraintKindChanged);
+  refs.addRuleBtn.addEventListener("click", onAddRuleClicked);
+  refs.clearRuleFormBtn.addEventListener("click", () => clearRuleForm(true));
+  refs.clearAllRulesBtn.addEventListener("click", onClearAllRulesClicked);
+  refs.applyJsonRulesBtn.addEventListener("click", onApplyJsonRulesClicked);
+  refs.rulesList.addEventListener("click", onRulesListClicked);
+
   refs.saveBtn.addEventListener("click", onSaveClicked);
   refs.fillBtn.addEventListener("click", onFillClicked);
   refs.undoBtn.addEventListener("click", onUndoClicked);
@@ -180,9 +225,9 @@ function applySettingsToForm(rawSettings) {
   refs.dateMode.value = settings.date.mode;
   refs.dateMinDays.value = toInputValue(settings.date.minDaysFromToday);
   refs.dateMaxDays.value = toInputValue(settings.date.maxDaysFromToday);
-  refs.rulesJson.value = settings.rules.length
-    ? JSON.stringify(settings.rules, null, 2)
-    : JSON.stringify(RULES_TEMPLATE, null, 2);
+
+  setRules(settings.rules, true);
+  clearRuleForm(false);
 }
 
 function syncProfileUiState() {
@@ -191,8 +236,26 @@ function syncProfileUiState() {
   refs.deleteProfileBtn.disabled = isProtected;
 }
 
-function toInputValue(value) {
-  return value === null || value === undefined ? "" : String(value);
+function onRuleConstraintKindChanged() {
+  updateRuleConstraintFieldsVisibility(refs.ruleConstraintKind.value);
+}
+
+function updateRuleConstraintFieldsVisibility(kind) {
+  const sections = [
+    ["date", refs.ruleDateFields],
+    ["number", refs.ruleNumberFields],
+    ["file", refs.ruleFileFields],
+    ["checkbox", refs.ruleCheckboxFields],
+    ["select", refs.ruleSelectFields],
+    ["fixed", refs.ruleFixedFields]
+  ];
+
+  for (const [sectionKind, node] of sections) {
+    if (!node) {
+      continue;
+    }
+    node.classList.toggle("hidden", sectionKind !== kind);
+  }
 }
 
 async function onProfileSelected() {
@@ -273,6 +336,351 @@ async function onDeleteProfileClicked() {
   } finally {
     syncProfileUiState();
   }
+}
+
+function onAddRuleClicked() {
+  try {
+    const rule = buildRuleFromForm();
+    const nextRules = [...currentRules];
+
+    if (editingRuleIndex >= 0 && editingRuleIndex < nextRules.length) {
+      nextRules[editingRuleIndex] = rule;
+      setStatus(`Updated rule #${editingRuleIndex + 1}.`);
+    } else {
+      nextRules.push(rule);
+      setStatus(`Added rule #${nextRules.length}.`);
+    }
+
+    setRules(nextRules, true);
+    clearRuleForm(false);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+function onClearAllRulesClicked() {
+  setRules([], true);
+  clearRuleForm(false);
+  setStatus("All rules cleared.");
+}
+
+function onApplyJsonRulesClicked() {
+  try {
+    const parsed = parseRulesJson(refs.rulesJson.value);
+    setRules(parsed, true);
+    clearRuleForm(false);
+    setStatus(`Loaded ${currentRules.length} rule${currentRules.length === 1 ? "" : "s"} from JSON.`);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+function onRulesListClicked(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const action = target.dataset.action;
+  if (!action) {
+    return;
+  }
+
+  const item = target.closest(".rule-item");
+  if (!item) {
+    return;
+  }
+
+  const index = Number(item.dataset.index);
+  if (!Number.isInteger(index) || index < 0 || index >= currentRules.length) {
+    return;
+  }
+
+  if (action === "remove") {
+    const nextRules = currentRules.filter((_, i) => i !== index);
+    setRules(nextRules, true);
+    clearRuleForm(false);
+    setStatus(`Removed rule #${index + 1}.`);
+    return;
+  }
+
+  if (action === "edit") {
+    loadRuleIntoBuilder(index);
+  }
+}
+
+function loadRuleIntoBuilder(index) {
+  const rule = currentRules[index];
+  if (!rule) {
+    return;
+  }
+
+  editingRuleIndex = index;
+  refs.addRuleBtn.textContent = "Update Rule";
+
+  refs.ruleSelector.value = rule.match?.selector || "";
+  refs.ruleTypeMatch.value = Array.isArray(rule.match?.types) && rule.match.types.length ? String(rule.match.types[0]) : "any";
+  refs.ruleNames.value = arrayToCsv(rule.match?.names);
+  refs.ruleKeywords.value = arrayToCsv(rule.match?.keywords);
+  refs.ruleRequired.value =
+    typeof rule.match?.required === "boolean" ? String(rule.match.required) : "any";
+
+  if (rule.constraints?.date) {
+    refs.ruleConstraintKind.value = "date";
+    refs.ruleDateMode.value = rule.constraints.date.mode || "any";
+    refs.ruleDateMinDays.value = toInputValue(rule.constraints.date.minDaysFromToday);
+    refs.ruleDateMaxDays.value = toInputValue(rule.constraints.date.maxDaysFromToday);
+  } else if (rule.constraints?.number) {
+    refs.ruleConstraintKind.value = "number";
+    refs.ruleNumberMode.value = rule.constraints.number.mode || "any";
+    refs.ruleNumberMin.value = toInputValue(rule.constraints.number.min);
+    refs.ruleNumberMax.value = toInputValue(rule.constraints.number.max);
+  } else if (rule.constraints?.file) {
+    refs.ruleConstraintKind.value = "file";
+    refs.ruleFileType.value = FILE_TYPES.includes(rule.constraints.file.preferredType)
+      ? rule.constraints.file.preferredType
+      : "auto";
+    refs.ruleFileMinKB.value = toInputValue(rule.constraints.file.minSizeKB);
+    refs.ruleFileMaxKB.value = toInputValue(rule.constraints.file.maxSizeKB);
+    refs.ruleFileMime.value = rule.constraints.file.mime || "";
+    refs.ruleFileExtension.value = rule.constraints.file.extension || "";
+  } else if (rule.constraints?.checkbox && typeof rule.constraints.checkbox === "object") {
+    refs.ruleConstraintKind.value = "checkbox";
+    refs.ruleCheckboxChecked.value = rule.constraints.checkbox.checked ? "true" : "false";
+  } else if (rule.constraints?.select && typeof rule.constraints.select === "object") {
+    refs.ruleConstraintKind.value = "select";
+    refs.ruleSelectPrefer.value = rule.constraints.select.preferNonPlaceholder === false ? "any" : "nonPlaceholder";
+  } else {
+    refs.ruleConstraintKind.value = "fixed";
+    refs.ruleFixedValue.value = rule.constraints?.fixedValue === undefined ? "" : String(rule.constraints.fixedValue);
+  }
+
+  updateRuleConstraintFieldsVisibility(refs.ruleConstraintKind.value);
+  setStatus(`Editing rule #${index + 1}.`);
+}
+
+function buildRuleFromForm() {
+  const match = {};
+  const selector = refs.ruleSelector.value.trim();
+  const type = refs.ruleTypeMatch.value;
+  const names = parseCsv(refs.ruleNames.value);
+  const keywords = parseCsv(refs.ruleKeywords.value);
+  const required = refs.ruleRequired.value;
+
+  if (selector) {
+    match.selector = selector;
+  }
+  if (type !== "any") {
+    match.types = [type];
+  }
+  if (names.length) {
+    match.names = names;
+  }
+  if (keywords.length) {
+    match.keywords = keywords;
+  }
+  if (required === "true") {
+    match.required = true;
+  } else if (required === "false") {
+    match.required = false;
+  }
+
+  if (!Object.keys(match).length) {
+    throw new Error("Rule must include at least one matcher (selector, type, names, keywords, or required).");
+  }
+
+  const constraints = {};
+  const kind = refs.ruleConstraintKind.value;
+
+  if (kind === "date") {
+    constraints.date = {
+      mode: refs.ruleDateMode.value,
+      minDaysFromToday: parseOptionalNumber(refs.ruleDateMinDays.value),
+      maxDaysFromToday: parseOptionalNumber(refs.ruleDateMaxDays.value)
+    };
+  } else if (kind === "number") {
+    constraints.number = {
+      mode: refs.ruleNumberMode.value,
+      min: parseOptionalNumber(refs.ruleNumberMin.value),
+      max: parseOptionalNumber(refs.ruleNumberMax.value)
+    };
+  } else if (kind === "file") {
+    constraints.file = {
+      enabled: true,
+      preferredType: FILE_TYPES.includes(refs.ruleFileType.value) ? refs.ruleFileType.value : "auto",
+      minSizeKB: parseOptionalNumber(refs.ruleFileMinKB.value),
+      maxSizeKB: parseOptionalNumber(refs.ruleFileMaxKB.value),
+      mime: refs.ruleFileMime.value.trim() || undefined,
+      extension: refs.ruleFileExtension.value.trim() || undefined
+    };
+  } else if (kind === "checkbox") {
+    constraints.checkbox = {
+      checked: refs.ruleCheckboxChecked.value === "true"
+    };
+  } else if (kind === "select") {
+    constraints.select = {
+      preferNonPlaceholder: refs.ruleSelectPrefer.value !== "any"
+    };
+  } else {
+    const fixedRaw = refs.ruleFixedValue.value.trim();
+    if (!fixedRaw) {
+      throw new Error("Fixed Value constraint needs a value.");
+    }
+    constraints.fixedValue = parseFixedValue(fixedRaw);
+  }
+
+  return { match, constraints };
+}
+
+function parseFixedValue(raw) {
+  const lower = raw.toLowerCase();
+  if (lower === "true") {
+    return true;
+  }
+  if (lower === "false") {
+    return false;
+  }
+  if (lower === "null") {
+    return null;
+  }
+  if (/^-?\d+(\.\d+)?$/.test(raw)) {
+    return Number(raw);
+  }
+  return raw;
+}
+
+function renderRulesList() {
+  refs.rulesList.innerHTML = "";
+  refs.rulesEmpty.classList.toggle("hidden", currentRules.length > 0);
+
+  currentRules.forEach((rule, index) => {
+    const li = document.createElement("li");
+    li.className = "rule-item";
+    li.dataset.index = String(index);
+
+    const title = document.createElement("p");
+    title.className = "rule-item-title";
+    title.textContent = `Rule #${index + 1}: ${summarizeConstraint(rule.constraints)}`;
+
+    const subtitle = document.createElement("p");
+    subtitle.className = "rule-item-subtitle";
+    subtitle.textContent = summarizeMatch(rule.match);
+
+    const actions = document.createElement("div");
+    actions.className = "rule-item-actions";
+    actions.innerHTML = `
+      <button class="secondary compact" data-action="edit">Edit</button>
+      <button class="secondary compact danger" data-action="remove">Remove</button>
+    `;
+
+    li.appendChild(title);
+    li.appendChild(subtitle);
+    li.appendChild(actions);
+    refs.rulesList.appendChild(li);
+  });
+}
+
+function summarizeMatch(match) {
+  if (!match || typeof match !== "object") {
+    return "No matcher";
+  }
+
+  const parts = [];
+  if (match.selector) {
+    parts.push(`selector=${match.selector}`);
+  }
+  if (Array.isArray(match.types) && match.types.length) {
+    parts.push(`type=${match.types.join(",")}`);
+  }
+  if (Array.isArray(match.names) && match.names.length) {
+    parts.push(`names=${match.names.join(",")}`);
+  }
+  if (Array.isArray(match.keywords) && match.keywords.length) {
+    parts.push(`keywords=${match.keywords.join(",")}`);
+  }
+  if (typeof match.required === "boolean") {
+    parts.push(`required=${match.required}`);
+  }
+
+  return parts.length ? parts.join(" | ") : "matcher: any";
+}
+
+function summarizeConstraint(constraints) {
+  if (!constraints || typeof constraints !== "object") {
+    return "constraint";
+  }
+  if (constraints.date) {
+    return `Date (${constraints.date.mode || "any"})`;
+  }
+  if (constraints.number) {
+    return `Number (${constraints.number.mode || "any"})`;
+  }
+  if (constraints.file) {
+    return `File (${constraints.file.preferredType || "auto"})`;
+  }
+  if (constraints.checkbox) {
+    return `Checkbox (${constraints.checkbox.checked ? "checked" : "unchecked"})`;
+  }
+  if (constraints.select) {
+    return `Select (${constraints.select.preferNonPlaceholder === false ? "any option" : "non-placeholder"})`;
+  }
+  if (Object.prototype.hasOwnProperty.call(constraints, "fixedValue")) {
+    return `Fixed (${String(constraints.fixedValue)})`;
+  }
+  return "Custom";
+}
+
+function clearRuleForm(updateStatus) {
+  editingRuleIndex = -1;
+  refs.addRuleBtn.textContent = "Add Rule";
+
+  refs.ruleSelector.value = "";
+  refs.ruleTypeMatch.value = "any";
+  refs.ruleNames.value = "";
+  refs.ruleKeywords.value = "";
+  refs.ruleRequired.value = "any";
+  refs.ruleConstraintKind.value = "date";
+
+  refs.ruleDateMode.value = "any";
+  refs.ruleDateMinDays.value = "";
+  refs.ruleDateMaxDays.value = "";
+
+  refs.ruleNumberMode.value = "any";
+  refs.ruleNumberMin.value = "";
+  refs.ruleNumberMax.value = "";
+
+  refs.ruleFileType.value = "auto";
+  refs.ruleFileMinKB.value = "";
+  refs.ruleFileMaxKB.value = "";
+  refs.ruleFileMime.value = "";
+  refs.ruleFileExtension.value = "";
+  refs.ruleCheckboxChecked.value = "true";
+  refs.ruleSelectPrefer.value = "nonPlaceholder";
+
+  refs.ruleFixedValue.value = "";
+  updateRuleConstraintFieldsVisibility("date");
+
+  if (updateStatus) {
+    setStatus("Rule form cleared.");
+  }
+}
+
+function setRules(rules, syncJson) {
+  currentRules = sanitizeRulesArray(rules);
+  renderRulesList();
+
+  if (syncJson) {
+    refs.rulesJson.value = JSON.stringify(currentRules, null, 2);
+  }
+}
+
+function sanitizeRulesArray(rules) {
+  if (!Array.isArray(rules)) {
+    return [];
+  }
+  return rules
+    .filter((rule) => rule && typeof rule === "object")
+    .map((rule) => clone(rule));
 }
 
 async function onSaveClicked() {
@@ -396,7 +804,8 @@ function getActiveProfile() {
 }
 
 function collectSettingsFromForm() {
-  const rules = parseRulesJson(refs.rulesJson.value);
+  const parsedRules = parseRulesJson(refs.rulesJson.value);
+  setRules(parsedRules, true);
 
   return normalizeSettings({
     preserveFilled: refs.preserveFilled.checked,
@@ -424,7 +833,7 @@ function collectSettingsFromForm() {
       minDaysFromToday: parseOptionalNumber(refs.dateMinDays.value),
       maxDaysFromToday: parseOptionalNumber(refs.dateMaxDays.value)
     },
-    rules
+    rules: currentRules
   });
 }
 
@@ -445,6 +854,24 @@ function parseRulesJson(source) {
   }
 
   return parsed;
+}
+
+function parseCsv(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function arrayToCsv(value) {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+  return value.join(", ");
+}
+
+function toInputValue(value) {
+  return value === null || value === undefined ? "" : String(value);
 }
 
 function parseOptionalNumber(value) {
@@ -487,7 +914,7 @@ function normalizeSettings(raw) {
   merged.date.maxDaysFromToday = coerceOptionalInteger(merged.date.maxDaysFromToday);
   merged.number.min = coerceOptionalNumber(merged.number.min);
   merged.number.max = coerceOptionalNumber(merged.number.max);
-  merged.rules = Array.isArray(merged.rules) ? merged.rules : [];
+  merged.rules = sanitizeRulesArray(merged.rules);
 
   return merged;
 }
