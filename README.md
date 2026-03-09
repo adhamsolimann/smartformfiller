@@ -17,21 +17,17 @@ Chrome/Brave extension for product managers and testers who repeatedly fill form
 - `textarea`
 - `select`
 
-## Install (Chrome)
+## Install (Chrome or Brave)
 
-1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
-3. Click **Load unpacked**.
-4. Select this folder:
-   - `/Users/adhamsoliman/Documents/New project/extensions/form-filler`
+1. Clone or download this repository.
+2. Open extensions page:
+   - Chrome: `chrome://extensions`
+   - Brave: `brave://extensions`
+3. Enable **Developer mode**.
+4. Click **Load unpacked**.
+5. Select the repository folder that contains `manifest.json`.
 
-## Install (Brave)
-
-1. Open `brave://extensions`.
-2. Enable **Developer mode**.
-3. Click **Load unpacked**.
-4. Select:
-   - `/Users/adhamsoliman/Documents/New project/extensions/form-filler`
+This extension is plain Manifest V3 JavaScript with no build step, so it can run on any machine with Chrome/Brave-compatible extension support.
 
 ## Usage
 
