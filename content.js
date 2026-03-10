@@ -10,6 +10,7 @@
   const SHORTCUT_TRIPLE_CLICK_WINDOW_MS = 700;
 
   const DEFAULT_SETTINGS = {
+    enabled: true,
     preserveFilled: true,
     onlyVisible: true,
     shortcut: {
@@ -309,6 +310,10 @@
     try {
       const storedSettings = await loadStoredSettings();
       const result = fillForm(storedSettings);
+      if (result.disabled) {
+        showShortcutStatus("Smart Form Filler is off.");
+        return;
+      }
       showShortcutStatus(`Filled ${result.filled} fields.`);
     } catch (error) {
       showShortcutStatus("Shortcut fill failed.", true);
@@ -413,6 +418,10 @@
 
   function fillForm(rawSettings) {
     const settings = normalizeSettings(rawSettings);
+    if (!settings.enabled) {
+      return { filled: 0, skipped: 0, errors: 0, details: [], disabled: true };
+    }
+
     const candidates = Array.from(document.querySelectorAll("input, textarea, select"));
     lastFillSnapshot = captureFillSnapshot(candidates);
     activeFillContext = buildFillContext();
@@ -705,6 +714,7 @@
 
   function normalizeSettings(raw) {
     const merged = deepMerge(clone(DEFAULT_SETTINGS), raw || {});
+    merged.enabled = merged.enabled !== false;
 
     if (!["any", "positive", "negative"].includes(merged.number?.mode)) {
       merged.number.mode = DEFAULT_SETTINGS.number.mode;

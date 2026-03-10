@@ -7,6 +7,7 @@ const DEFAULT_PROFILE_ID = "default";
 const FILE_TYPES = ["auto", "pdf", "jpg", "png", "docx"];
 
 const DEFAULT_SETTINGS = {
+  enabled: true,
   preserveFilled: true,
   onlyVisible: true,
   shortcut: {
@@ -107,6 +108,7 @@ let uiState = clone(DEFAULT_UI_STATE);
 let currentRules = [];
 let editingRuleIndex = -1;
 let applyingUiState = false;
+let extensionEnabledUi = true;
 
 document.addEventListener("DOMContentLoaded", initializePopup);
 
@@ -140,6 +142,7 @@ function bindElements() {
   refs.profileName = document.getElementById("profileName");
   refs.saveProfileBtn = document.getElementById("saveProfileBtn");
   refs.deleteProfileBtn = document.getElementById("deleteProfileBtn");
+  refs.extensionEnabledBtn = document.getElementById("extensionEnabledBtn");
 
   refs.preserveFilled = document.getElementById("preserveFilled");
   refs.onlyVisible = document.getElementById("onlyVisible");
@@ -216,6 +219,9 @@ function bindEvents() {
   refs.saveBtn.addEventListener("click", onSaveClicked);
   refs.fillBtn.addEventListener("click", onFillClicked);
   refs.undoBtn.addEventListener("click", onUndoClicked);
+  if (refs.extensionEnabledBtn) {
+    refs.extensionEnabledBtn.addEventListener("click", onExtensionEnabledClicked);
+  }
   if (refs.openInTabBtn) {
     refs.openInTabBtn.addEventListener("click", onOpenInTabClicked);
   }
@@ -263,6 +269,42 @@ function getTabViewUrl() {
   return url.toString();
 }
 
+function setExtensionEnabledUi(enabled) {
+  extensionEnabledUi = Boolean(enabled);
+  if (!refs.extensionEnabledBtn) {
+    return;
+  }
+
+  refs.extensionEnabledBtn.textContent = extensionEnabledUi ? "On" : "Off";
+  refs.extensionEnabledBtn.classList.toggle("is-off", !extensionEnabledUi);
+  refs.extensionEnabledBtn.setAttribute("aria-pressed", extensionEnabledUi ? "true" : "false");
+  refs.extensionEnabledBtn.title = extensionEnabledUi ? "Extension is on" : "Extension is off";
+}
+
+async function onExtensionEnabledClicked() {
+  if (!refs.extensionEnabledBtn) {
+    return;
+  }
+
+  const nextEnabled = !extensionEnabledUi;
+  setExtensionEnabledUi(nextEnabled);
+  refs.extensionEnabledBtn.disabled = true;
+
+  try {
+    const active = getActiveProfile();
+    const normalized = normalizeSettings(active.settings);
+    normalized.enabled = nextEnabled;
+    active.settings = normalized;
+    await persistState();
+    setStatus(nextEnabled ? "Extension turned on." : "Extension turned off.");
+  } catch (error) {
+    setExtensionEnabledUi(!nextEnabled);
+    setStatus(`Failed to update extension state: ${error.message}`, true);
+  } finally {
+    refs.extensionEnabledBtn.disabled = false;
+  }
+}
+
 function renderProfiles() {
   refs.profileSelect.innerHTML = "";
 
@@ -279,6 +321,7 @@ function renderProfiles() {
 function applySettingsToForm(rawSettings) {
   const settings = normalizeSettings(rawSettings);
 
+  setExtensionEnabledUi(settings.enabled);
   refs.preserveFilled.checked = Boolean(settings.preserveFilled);
   refs.onlyVisible.checked = Boolean(settings.onlyVisible);
   refs.shortcutClickCount.value = String(settings.shortcut.clickCount);
@@ -860,6 +903,11 @@ async function onFillClicked() {
     setActiveProfileSettings(settings);
     await persistState();
 
+    if (!settings.enabled) {
+      setStatus("Extension is off. Turn it on to fill forms.");
+      return;
+    }
+
     const activeTab = await getActiveTab();
     if (!activeTab || !activeTab.id) {
       throw new Error("No active tab found.");
@@ -879,6 +927,10 @@ async function onFillClicked() {
     }
 
     const result = response.result || {};
+    if (result.disabled) {
+      setStatus("Extension is off. Turn it on to fill forms.");
+      return;
+    }
     const parts = [`Filled ${result.filled || 0} fields`];
     if (result.skipped) {
       parts.push(`skipped ${result.skipped}`);
@@ -962,6 +1014,7 @@ function collectSettingsFromForm() {
   setRules(parsedRules, true);
 
   return normalizeSettings({
+    enabled: extensionEnabledUi,
     preserveFilled: refs.preserveFilled.checked,
     onlyVisible: refs.onlyVisible.checked,
     shortcut: {
@@ -1038,6 +1091,7 @@ function parseOptionalNumber(value) {
 
 function normalizeSettings(raw) {
   const merged = deepMerge(clone(DEFAULT_SETTINGS), raw || {});
+  merged.enabled = merged.enabled !== false;
 
   if (!["any", "positive", "negative"].includes(merged.number.mode)) {
     merged.number.mode = DEFAULT_SETTINGS.number.mode;

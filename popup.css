@@ -63,8 +63,32 @@ body {
   min-width: 0;
 }
 
+.panel-header-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
 #openInTabBtn {
   white-space: nowrap;
+}
+
+#extensionEnabledBtn.toggle-power {
+  min-height: 30px;
+  min-width: 76px;
+  padding: 0 10px;
+  border-color: #b8d9ce;
+  background: #ecf9f3;
+  color: #0f654f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+#extensionEnabledBtn.toggle-power.is-off {
+  border-color: #e1c2bd;
+  background: #fff2f0;
+  color: #8a2b21;
 }
 
 .panel-scroll {
@@ -394,6 +418,11 @@ body.tab-mode .panel {
 
 body.tab-mode #openInTabBtn {
   display: none;
+}
+
+body.tab-mode .panel-header-actions {
+  flex-direction: row;
+  align-items: center;
 }
 
 body.tab-mode .panel-scroll {
